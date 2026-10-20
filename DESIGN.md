@@ -1,9 +1,7 @@
-# Webcam studio design
+# Parametric Studio UI port
 
-Reference: https://parametric.iverfinne.no/, inspected 20 October 2026. GitHub source: lukketsvane/parametric.iverfinne.no, main tree 6a52ea64d4310dc17ba8cac4765914c4633bc7fa.
+Source: https://github.com/lukketsvane/parametric.iverfinne.no, inspected 20 October 2026.
 
-Observed in the screenshot and source: a large model stage, system sans-serif, a sparse white canvas, monochrome controls, bottom floating toolbar, demand-driven Three.js rendering, automatic framing and shareable URL parameter state. The reference uses a 32-degree perspective camera, capped device pixel ratio and no visible panel shadows.
+The webcam UI uses the existing studio's actual component layout and interaction model: full model stage, small top-right site link, 448 px maximum-width bottom dock with 24 px corners, 40 px circular action buttons, 32 px native picker, 11 px tracked labels, thin parameter sliders, and an expandable body limited to 56 viewport-height units. The component layout is ported to browser-native HTML/CSS without the unrelated sculpture engines.
 
-The webcam editor adapts these patterns to a precise manufacturing task: persistent 326 px sidebar on desktop, compact bottom controls on phones, a warm white stage (#f5f6f2), restrained green-gray control accents, 1 px borders and system typography. It adds explicit millimetre units, editable numeric values, geometry constraints and export choices. These dimensions and colors are proposed values, not claims of pixel-perfect reference reproduction.
-
-Mobile layout is triggered at 700 px. Primary actions remain in the header. Layout, Camera and Mount tabs contain related controls; secondary retention geometry sits in a disclosure. The model remains visible while the compact panel scrolls independently.
+Pure white/black colors follow the system. Safe-area padding follows the original dock. Expanded controls take space in the page layout, leaving the model visible. Export is a direct action in the dock and an inline format row. Touch gestures are ported from the original GestureParams component.
