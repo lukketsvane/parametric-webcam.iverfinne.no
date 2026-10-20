@@ -1,3 +1,5 @@
+export const RETENTION_WEB_MIN = 1.2;
+
 export const DEFAULTS = Object.freeze({
   camera_count: 2, spacing: 140, cam_w: 31, cam_h: 39, cam_d: 18,
   fit: 0.4, lens_d: 19, lens_dy: 0, recess_w: 91, recess_h: 20,
@@ -10,6 +12,8 @@ const clamp = (value, fallback, low, high) => {
   const number = Number(value);
   return Math.min(high, Math.max(low, Number.isFinite(number) ? number : fallback));
 };
+
+const roundRetention = value => Number(value.toFixed(9));
 
 export function normalize(input = {}) {
   const p = { ...DEFAULTS };
@@ -34,11 +38,27 @@ export function normalize(input = {}) {
   p.tie_back = Math.min(p.tie_back, (p.cam_d - 1) / 3);
   p.tie_z = Math.min(p.tie_z, p.cam_d - 1 - p.tie_back - 0.5);
   p.corner_r = Math.min(p.corner_r, (p.cam_h + p.fit + 2 * p.wall) / 2 - 0.1);
+  const slotEdge = p.t_hole_x - p.t_hole / 2 - RETENTION_WEB_MIN;
+  const slotWidth = roundRetention(clamp(input.t_slot?.[0] ?? DEFAULTS.t_slot[0], 12, 6, Math.min(28, slotEdge - 1, 2 * (slotEdge - 8))));
   p.t_slot = [
-    clamp(input.t_slot?.[0] ?? DEFAULTS.t_slot[0], 12, 6, 2 * p.t_slot_x - 2),
+    slotWidth,
     clamp(input.t_slot?.[1] ?? DEFAULTS.t_slot[1], 3.2, 2, Math.min(6, p.recess_h - 4))
   ];
+  p.t_slot_x = roundRetention(clamp(p.t_slot_x, 9, Math.max(8, slotWidth / 2 + 1), Math.min(15, slotEdge - slotWidth / 2)));
   return p;
+}
+
+export function retentionLimits(input = DEFAULTS) {
+  const p = normalize(input);
+  const halfWidth = p.t_slot[0] / 2;
+  const slotEdge = p.t_hole_x - p.t_hole / 2 - RETENTION_WEB_MIN;
+  const range = (min, max) => [roundRetention(min), roundRetention(max)];
+  return {
+    t_slot_x: range(Math.max(8, halfWidth + 1), Math.min(15, slotEdge - halfWidth)),
+    t_hole_x: range(Math.max(20, p.t_slot_x + halfWidth + p.t_hole / 2 + RETENTION_WEB_MIN), 28),
+    t_hole: range(2, Math.min(6, 2 * (p.t_hole_x - p.t_slot_x - halfWidth - RETENTION_WEB_MIN))),
+    t_slot_width: range(6, Math.min(28, 2 * (p.t_slot_x - 1), 2 * (slotEdge - p.t_slot_x)))
+  };
 }
 
 function derive(p) {

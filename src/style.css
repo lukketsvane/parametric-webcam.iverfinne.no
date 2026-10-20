@@ -3,3 +3,5 @@
 .field-note{font-size:10px;line-height:1.5;opacity:.5;margin:2px 0 10px}
 
 .dimension-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden;color:var(--ink)}.dimension-overlay path{fill:none;stroke:currentColor;stroke-width:.75;opacity:.5;vector-effect:non-scaling-stroke}.dimension-overlay rect{fill:var(--paper)}.dimension-overlay text{fill:currentColor;font-family:inherit;font-size:10px;text-anchor:middle;letter-spacing:.015em;font-variant-numeric:tabular-nums}.stage-meta #projection-label{text-transform:uppercase}
+
+.retention-fit{display:block;font-size:10px;line-height:1.5;opacity:.6;margin:8px 0 4px;font-variant-numeric:tabular-nums}

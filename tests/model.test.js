@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Module from 'manifold-3d';
-import { DEFAULTS, normalize, dimensions, buildModel, generateScad } from '../src/model.js';
+import { DEFAULTS, RETENTION_WEB_MIN, normalize, retentionLimits, dimensions, buildModel, generateScad } from '../src/model.js';
 
 const module = await Module();
 module.setup();
@@ -115,3 +115,88 @@ test('SCAD export carries normalized parameters and original boolean geometry', 
   assert.match(source, /cube\(\[wall \+ 2, tie_y, tie_z\], center = true\)/);
   assert.match(source, /assert\(camera_count >= 1 && camera_count <= 14/);
 });
+
+test('retention normalization preserves defaults and separates slots from screw holes', () => {
+  assert.equal(RETENTION_WEB_MIN, 1.2);
+  assert.deepEqual(normalize(DEFAULTS), DEFAULTS);
+  const p = normalize({ t_slot_x: 15 });
+  assert.equal(p.t_slot_x, 13.1);
+  assert.deepEqual(p.t_slot, DEFAULTS.t_slot);
+  assert.ok(p.t_hole_x - p.t_hole / 2 - p.t_slot_x - p.t_slot[0] / 2 >= RETENTION_WEB_MIN - 1e-10);
+  const source = generateScad(p);
+  assert.match(source, new RegExp(`t_slot_x = ${p.t_slot_x};`));
+});
+
+test('retention rounding preserves unrelated imported precision and stays idempotent', () => {
+  const input = { spacing: 140.123456789123, cam_w: 31.123456789123, t_slot_x: 15, t_slot: [12.123456789123, 3.123456789123], t_hole_x: 22.123456789123, t_hole: 3.123456789123 };
+  const p = normalize(input);
+  assert.equal(p.spacing, input.spacing);
+  assert.equal(p.cam_w, input.cam_w);
+  assert.equal(p.t_slot[1], input.t_slot[1]);
+  assert.equal(p.t_hole_x, input.t_hole_x);
+  assert.equal(p.t_hole, input.t_hole);
+  assert.equal(p.t_slot[0], 12.123456789);
+  assert.equal(p.t_slot_x, Number(p.t_slot_x.toFixed(9)));
+  assert.deepEqual(normalize(p), p);
+  for (const bounds of Object.values(retentionLimits(p))) {
+    for (const value of bounds) assert.equal(value, Number(value.toFixed(9)));
+  }
+  assert.ok(p.t_hole_x - p.t_hole / 2 - p.t_slot_x - p.t_slot[0] / 2 >= RETENTION_WEB_MIN - 1e-9);
+  assert.ok(2 * p.t_slot_x - p.t_slot[0] >= 2 - 1e-9);
+});
+
+test('coupled retention limits preserve both webs across imported extrema', () => {
+  for (const t_hole_x of [20, 22, 28]) {
+    for (const t_hole of [2, 3.4, 6]) {
+      for (const width of [6, 12, 28]) {
+        for (const t_slot_x of [8, 9, 15]) {
+          const p = normalize({ t_hole_x, t_hole, t_slot_x, t_slot: [width, 3.2] });
+          assert.ok(2 * p.t_slot_x - p.t_slot[0] >= 2 - 1e-10);
+          assert.ok(p.t_hole_x - p.t_hole / 2 - p.t_slot_x - p.t_slot[0] / 2 >= RETENTION_WEB_MIN - 1e-10);
+          assert.deepEqual(normalize(p), p);
+          const values = { ...p, t_slot_width: p.t_slot[0] };
+          for (const [key, [min, max]] of Object.entries(retentionLimits(p))) {
+            assert.ok(min <= max + 1e-10);
+            assert.ok(values[key] >= min - 1e-10 && values[key] <= max + 1e-10);
+            for (const edge of [min, max]) {
+              const changed = key === 't_slot_width' ? { ...p, t_slot: [edge, p.t_slot[1]] } : { ...p, [key]: edge };
+              const normalized = normalize(changed);
+              assert.ok(Math.abs((key === 't_slot_width' ? normalized.t_slot[0] : normalized[key]) - edge) < 1e-10);
+            }
+          }
+        }
+      }
+    }
+  }
+});
+
+for (const input of [
+  { t_slot_x: 15 },
+  { t_slot_x: 15, t_hole_x: 20, t_hole: 6 },
+  { t_slot_x: 15, t_hole_x: 20, t_hole: 6, t_slot: [28, 6] }
+]) {
+  test(`retention openings remain distinct in actual mesh: ${JSON.stringify(input)}`, () => {
+    const p = normalize(input);
+    const model = buildModel(module, p);
+    verifyMesh(model, [178.4, 64.2, 20.5]);
+    const solid = new module.Manifold(new module.Mesh({ numProp: 3, vertProperties: model.positions, triVerts: model.indices }));
+    const parts = solid.decompose();
+    try {
+      assert.equal(solid.status(), 'NoError');
+      assert.equal(parts.length, 1);
+      assert.equal(solid.genus(), 10);
+    } finally {
+      for (const part of parts) part.delete();
+      solid.delete();
+    }
+    const y = (p.recess_h - 0.4) / 2 - model.dimensions.height / 2;
+    for (const sign of [-1, 1]) {
+      assert.equal(intersections(model, sign * p.t_slot_x, y + 0.13).length, 0);
+      assert.equal(intersections(model, sign * p.t_hole_x, y + 0.13).length, 0);
+      const webX = (p.t_slot_x + p.t_slot[0] / 2 + p.t_hole_x - p.t_hole / 2) / 2;
+      const web = intersections(model, sign * webX, y + 0.13);
+      assert.equal(web.length, 2);
+      assert.ok(Math.abs(web[1] - web[0] - p.face_t) < 0.001);
+    }
+  });
+}
