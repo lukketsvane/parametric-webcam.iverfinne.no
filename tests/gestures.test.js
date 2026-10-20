@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { setupGestures } from '../src/gestures.js';
 
-function fixture() {
+function fixture(camera = new THREE.PerspectiveCamera()) {
   const frames = new Map();
   let sequence = 0;
   const previous = { window: globalThis.window, requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame };
@@ -11,14 +11,14 @@ function fixture() {
   globalThis.requestAnimationFrame = callback => { const id = ++sequence; frames.set(id, callback); return id; };
   globalThis.cancelAnimationFrame = id => frames.delete(id);
   const canvas = new EventTarget();
-  const camera = new THREE.PerspectiveCamera();
+  let activeCamera = camera;
   camera.position.set(0, 0, 200);
   const controls = { target: new THREE.Vector3(), enabled: true, minDistance: 100, maxDistance: 300, update() {} };
   const nudges = [];
   const lights = [];
   const edits = [];
   const positions = new Map();
-  const cleanup = setupGestures({ canvas, camera, controls, onNudge: (...args) => nudges.push(args), onLight: (...args) => lights.push(args), onEditStart: () => edits.push('start'), onEditEnd: () => edits.push('end'), render() {} });
+  const cleanup = setupGestures({ canvas, getCamera: () => activeCamera, controls, onNudge: (...args) => nudges.push(args), onLight: (...args) => lights.push(args), onEditStart: () => edits.push('start'), onEditEnd: () => edits.push('end'), render() {} });
   const send = (type, id, x, y, pointerType = 'touch') => {
     if (x === undefined) [x, y] = positions.get(id) || [0, 0];
     positions.set(id, [x, y]);
@@ -27,7 +27,7 @@ function fixture() {
     (type === 'pointerdown' ? canvas : window).dispatchEvent(event);
   };
   return {
-    canvas, camera, controls, nudges, lights, edits, send,
+    canvas, get camera() { return activeCamera; }, useCamera(next) { activeCamera = next; }, controls, nudges, lights, edits, send,
     tick() { const pending = [...frames.values()]; frames.clear(); for (const callback of pending) callback(); },
     pending: () => frames.size,
     blur: () => window.dispatchEvent(new Event('blur')),
@@ -186,3 +186,32 @@ for (const end of ['blur', 'cancel', 'unmount']) {
     } finally { if (!disposed) f.dispose(); }
   });
 }
+
+test('orthographic pinch changes zoom without moving the camera and respects zoom limits', () => {
+  const camera = new THREE.OrthographicCamera(-100,100,100,-100,.1,1000);
+  const f = fixture(camera);
+  f.controls.minZoom=.5;f.controls.maxZoom=2;
+  try {
+    f.send('pointerdown',1,0,0);f.send('pointerdown',2,100,0);
+    f.send('pointermove',1,-25,0);f.send('pointermove',2,125,0);f.tick();
+    assert.equal(camera.zoom,1.5);
+    assert.deepEqual(camera.position.toArray(),[0,0,200]);
+    f.send('pointermove',1,-250,0);f.send('pointermove',2,350,0);f.tick();
+    assert.equal(camera.zoom,2);
+    f.send('pointermove',1,49,0);f.send('pointermove',2,51,0);f.tick();
+    assert.equal(camera.zoom,.5);
+    assert.deepEqual(f.nudges,[]);assert.deepEqual(f.edits,[]);
+  } finally { f.dispose(); }
+});
+
+test('gestures use the active camera after changing projection', () => {
+  const f=fixture(),previous=f.camera;
+  const next=new THREE.OrthographicCamera(-100,100,100,-100,.1,1000);next.position.set(0,0,200);
+  f.useCamera(next);
+  try {
+    f.send('pointerdown',1,0,0);f.send('pointerdown',2,100,0);
+    f.send('pointermove',1,-25,0);f.send('pointermove',2,125,0);f.tick();
+    assert.equal(next.zoom,1.5);assert.equal(previous.zoom,1);
+    assert.deepEqual(previous.position.toArray(),[0,0,200]);
+  } finally { f.dispose(); }
+});

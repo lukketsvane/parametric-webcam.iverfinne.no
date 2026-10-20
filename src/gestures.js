@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export function setupGestures({ canvas, camera, controls, onNudge, onLight, onEditStart, onEditEnd, render }) {
+export function setupGestures({ canvas, camera: initialCamera, getCamera = () => initialCamera, controls, onNudge, onLight, onEditStart, onEditEnd, render }) {
   const points = new Map();
   let mode = 'none';
   let last = { cx: 0, cy: 0, d: 0 };
@@ -14,6 +14,9 @@ export function setupGestures({ canvas, camera, controls, onNudge, onLight, onEd
   };
   const restoreCamera = () => {
     if (!snapshot) return;
+    const camera = getCamera();
+    camera.zoom = snapshot.zoom;
+    camera.updateProjectionMatrix();
     camera.position.copy(snapshot.position);
     if (controls?.target) {
       controls.target.copy(snapshot.target);
@@ -68,7 +71,13 @@ export function setupGestures({ canvas, camera, controls, onNudge, onLight, onEd
       }
     }
     if (mode === 'pinch') {
-      if (last.d > 0 && center.d > 0) {
+      const camera = getCamera();
+      if (last.d > 0 && center.d > 0 && camera.isOrthographicCamera) {
+        camera.zoom = THREE.MathUtils.clamp(camera.zoom * center.d / last.d, controls?.minZoom ?? .1, controls?.maxZoom ?? 12);
+        camera.updateProjectionMatrix();
+        controls?.update?.();
+        render();
+      } else if (last.d > 0 && center.d > 0) {
         const target = controls?.target?.clone() ?? new THREE.Vector3();
         const offset = camera.position.clone().sub(target);
         const distance = THREE.MathUtils.clamp(
@@ -99,7 +108,9 @@ export function setupGestures({ canvas, camera, controls, onNudge, onLight, onEd
     flush();
     points.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (points.size === 1) {
+      const camera = getCamera();
       snapshot = {
+        zoom: camera.zoom,
         position: camera.position.clone(),
         target: controls?.target?.clone() ?? new THREE.Vector3()
       };

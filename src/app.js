@@ -3,6 +3,8 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import {createPlaMaterial,createDisplayGeometry} from './appearance.js';
 import {createHistory} from './history.js';
+import {VIEW_DIRECTIONS,frameCamera} from './view.js';
+import {projectMeasurements,measurementMarkup} from './measurements.js';
 import {STLExporter} from 'three/addons/exporters/STLExporter.js';
 import {DEFAULTS,normalize,dimensions,generateScad} from './model.js';
 import {setupGestures} from './gestures.js';
@@ -26,18 +28,21 @@ try{const hash=location.hash.slice(1);const saved=hash.startsWith('p=')?JSON.par
 const edits=createHistory(params);
 const worker=new Worker(new URL('./model-worker.js',import.meta.url),{type:'module'});
 const canvas=$('canvas');
-let renderer,scene,camera,controls,material,dimensionGroup,fallback,lightKey;
+let renderer,scene,camera,controls,material,fallback,lightKey;
+const perspectiveCamera=new THREE.PerspectiveCamera(32,1,.1,50000),inspectionCamera=new THREE.OrthographicCamera(-1,1,1,-1,.1,50000);
+const theme=matchMedia('(prefers-color-scheme:dark)');
+const wireMaterial=new THREE.MeshBasicMaterial({color:theme.matches?0xb5bac2:0x444a52,wireframe:true,transparent:true,opacity:.75});
 scene=new THREE.Scene();
-camera=new THREE.PerspectiveCamera(32,1,.1,50000);
+camera=perspectiveCamera;
 controls=new OrbitControls(camera,canvas);
 controls.enablePan=false;
 controls.rotateSpeed=.75;
+controls.minZoom=.1;controls.maxZoom=12;
 controls.addEventListener('change',render);
 material=createPlaMaterial();
 const key=new THREE.DirectionalLight(0xfff9f2,2.4);key.position.set(-3,7,4);lightKey=key;
 const fill=new THREE.DirectionalLight(0xe8efff,1.4);fill.position.set(5,2,-4);
 scene.add(key,fill,new THREE.HemisphereLight(0xffffff,0x34363b,1.1));
-dimensionGroup=new THREE.Group();scene.add(dimensionGroup);
 try{
  renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'low-power'});
  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
@@ -50,7 +55,14 @@ try{
  canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();$('build-state').textContent='3D paused. Reload to restore the view.';});
 }catch{renderer=null;fallback=canvas.getContext('2d');}
 new ResizeObserver(resize).observe($('viewport'));
-function render(){if(!camera)return;if(renderer)renderer.render(scene,camera);else if(fallback)drawFallback();if(showDimensions&&dimensionGroup.userData.label){const p=dimensionGroup.userData.label.clone().project(camera);const r=$('viewport').getBoundingClientRect();$('dimension-label').style.left=(r.width*(p.x+1)/2)+'px';$('dimension-label').style.top=(r.height*(1-p.y)/2+$('viewport').offsetTop-25)+'px';}}
+function render(){if(!camera)return;if(renderer)renderer.render(scene,camera);else if(fallback)drawFallback();drawMeasurements();}
+function drawMeasurements(){
+ const overlay=$('dimension-overlay'),r=$('viewport').getBoundingClientRect(),visible=showDimensions&&mesh&&r.width>=240&&r.height>=240;overlay.toggleAttribute('hidden',!visible);
+ if(!visible)return;
+ overlay.setAttribute('viewBox',`0 0 ${r.width} ${r.height}`);
+ const measurements=projectMeasurements(mesh.userData.params,mesh.geometry.boundingBox,camera,r.width,r.height);
+ overlay.innerHTML=measurementMarkup(measurements);
+}
 function drawFallback(){
  const ctx=fallback,w=canvas.width,h=canvas.height;
  ctx.clearRect(0,0,w,h);
@@ -68,7 +80,8 @@ function drawFallback(){
  for(let i=0;i<positions.count;i+=3){
   const ai=i,bi=i+1,ci=i+2,a=projected[ai],b=projected[bi],c=projected[ci];
   const normal=new THREE.Vector3().subVectors(world[bi],world[ai]).cross(new THREE.Vector3().subVectors(world[ci],world[ai])).normalize();
-  if(normal.dot(camera.position.clone().sub(world[ai]))<=0)continue;
+  const facing=camera.isOrthographicCamera?camera.position.clone().sub(controls.target):camera.position.clone().sub(world[ai]);
+  if(normal.dot(facing)<=0)continue;
   if(wireframe){ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.lineTo(c[0],c[1]);ctx.closePath();ctx.strokeStyle=matchMedia('(prefers-color-scheme:dark)').matches?'#aaa':'#555';ctx.lineWidth=.5;ctx.stroke();continue;}
   const den=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1]);
   if(Math.abs(den)<.001)continue;
@@ -86,29 +99,26 @@ function drawFallback(){
  if(!wireframe)ctx.putImageData(image,0,0);
 }
 let framedDistance=0;
-const viewDirections={iso:new THREE.Vector3(.3,.23,1).normalize(),front:new THREE.Vector3(0,0,1),rear:new THREE.Vector3(0,0,-1),top:new THREE.Vector3(0,1,.001).normalize()};
-function resize(){if(!camera)return;const r=$('viewport').getBoundingClientRect();if(!r.width||!r.height)return;if(renderer)renderer.setSize(r.width,r.height,false);else{canvas.width=r.width*Math.min(devicePixelRatio,1.5);canvas.height=r.height*Math.min(devicePixelRatio,1.5);}camera.aspect=r.width/r.height;camera.updateProjectionMatrix();if(mesh)frameModel({preserveZoom:true});else render();}
-function frameModel({direction,preserveZoom=false}={}){
+function resize(){if(!camera)return;const r=$('viewport').getBoundingClientRect();if(!r.width||!r.height)return;$('dimensions-toggle').disabled=r.width<240||r.height<240;if(renderer)renderer.setSize(r.width,r.height,false);else{canvas.width=r.width*Math.min(devicePixelRatio,1.5);canvas.height=r.height*Math.min(devicePixelRatio,1.5);}perspectiveCamera.aspect=r.width/r.height;if(mesh)frameModel({preserveZoom:true});else{camera.updateProjectionMatrix();render();}}
+function frameModel({direction,preserveZoom=false,parallel}={}){
  if(!mesh)return;
- mesh.geometry.computeBoundingSphere();
- const radius=mesh.geometry.boundingSphere.radius;
- const vHalf=THREE.MathUtils.degToRad(camera.fov/2),half=Math.min(vHalf,Math.atan(Math.tan(vHalf)*camera.aspect));
- const distance=radius/Math.sin(half)*1.15;
- const offset=camera.position.clone().sub(controls.target),zoom=preserveZoom&&framedDistance?offset.length()/framedDistance:1;
- const axis=direction||(!framedDistance?viewDirections.iso:offset.normalize());
- controls.target.set(0,0,0);
- controls.minDistance=radius*.4;controls.maxDistance=radius*18;
- camera.position.copy(axis).multiplyScalar(THREE.MathUtils.clamp(distance*zoom,controls.minDistance,controls.maxDistance));
- camera.near=Math.max(.01,radius/1000);camera.far=Math.max(radius*100,controls.maxDistance*2);
- camera.updateProjectionMatrix();framedDistance=distance;controls.update();render();
+ const viewport=$('viewport').getBoundingClientRect();if(!viewport.width||!viewport.height)return;
+ const offset=camera.position.clone().sub(controls.target);
+ const zoom=preserveZoom&&framedDistance?(camera.isOrthographicCamera?camera.zoom:framedDistance/offset.length()):1;
+ const axis=direction||(!framedDistance?VIEW_DIRECTIONS.iso:offset.normalize());
+ if(parallel!==undefined){camera=parallel?inspectionCamera:perspectiveCamera;controls.object=camera;}
+ const framed=frameCamera(camera,mesh.geometry.boundingBox,{width:viewport.width,height:viewport.height,direction:axis,zoom,padding:showDimensions&&viewport.width>=240&&viewport.height>=240?{x:52,y:84}:24});
+ controls.target.copy(framed.center);controls.minDistance=framed.radius*.4;controls.maxDistance=framed.radius*100;
+ framedDistance=framed.distance;controls.update();syncView();render();
 }
 function syncView(){
  if(!framedDistance)return;
  const direction=camera.position.clone().sub(controls.target).normalize();
- document.querySelectorAll('[data-view]').forEach(el=>{const selected=direction.dot(viewDirections[el.dataset.view])>.9999;el.classList.toggle('selected',selected);el.setAttribute('aria-pressed',String(selected));});
+ document.querySelectorAll('[data-view]').forEach(el=>{const selected=direction.dot(VIEW_DIRECTIONS[el.dataset.view])>.9999&&(el.dataset.view==='iso')===!camera.isOrthographicCamera;el.classList.toggle('selected',selected);el.setAttribute('aria-pressed',String(selected));});
+ $('projection-label').hidden=!camera.isOrthographicCamera;
 }
 controls.addEventListener('change',syncView);
-function dimensionLines(){if(!dimensionGroup)return;dimensionGroup.children.forEach(o=>{o.geometry.dispose();o.material.dispose();});dimensionGroup.clear();dimensionGroup.visible=showDimensions;const d=dimensions(params);const span=params.camera_count>1?params.spacing:d.width;const y=d.height/2+10,z=d.depth/2+2,mid=params.camera_count>1?-(params.camera_count-2)*params.spacing/2:0;const pts=[[-span/2,y,z],[span/2,y,z],[-span/2,y-5,z],[-span/2,y+5,z],[span/2,y-5,z],[span/2,y+5,z],[-span/2+4,y+2,z],[-span/2,y,z],[-span/2+4,y-2,z],[-span/2,y,z],[span/2-4,y+2,z],[span/2,y,z],[span/2-4,y-2,z],[span/2,y,z]];const geometry=new THREE.BufferGeometry().setFromPoints(pts.map(a=>new THREE.Vector3(a[0]+mid,a[1],a[2])));const lineMaterial=new THREE.LineBasicMaterial({color:0x869b72,transparent:true,opacity:.7,depthTest:false});dimensionGroup.add(new THREE.LineSegments(geometry,lineMaterial));dimensionGroup.userData.label=new THREE.Vector3(mid,y,z);$('dimension-value').textContent=fmt(span)+' mm';render();}
+theme.addEventListener('change',()=>{wireMaterial.color.setHex(theme.matches?0xb5bac2:0x444a52);render();});
 function fmt(n){return Number(n.toFixed(2)).toString();}
 function sync(){
  const d=dimensions(params);
@@ -132,8 +142,8 @@ worker.onmessage=({data})=>{
  if(data.error){$('loading').hidden=true;$('build-state').textContent='Could not build this configuration. Adjust the dimensions.';toast('Geometry could not be built.');return;}
  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(data.positions,3));geometry.setIndex(new THREE.BufferAttribute(data.indices,1));
  if(mesh){scene.remove(mesh);mesh.geometry.dispose();mesh.userData.exportGeometry.dispose();}
- mesh=new THREE.Mesh(createDisplayGeometry(geometry),material);mesh.userData.exportGeometry=geometry;scene.add(mesh);completedId=data.id;
- $('loading').hidden=true;$('build-state').textContent='';sync();dimensionLines();frameModel({preserveZoom:true});
+ mesh=new THREE.Mesh(createDisplayGeometry(geometry),wireframe?wireMaterial:material);mesh.geometry.computeBoundingBox();mesh.userData.exportGeometry=geometry;mesh.userData.params=structuredClone(params);scene.add(mesh);completedId=data.id;
+ $('loading').hidden=true;$('build-state').textContent='';sync();frameModel({preserveZoom:true});
 };
 worker.onerror=()=>{$('loading').hidden=true;$('build-state').textContent='Geometry engine could not load. Reload to retry.';};
 document.querySelectorAll('[data-param]').forEach(el=>{const event=el.type==='range'?'input':'change';el.addEventListener(event,()=>{const key=el.dataset.param;const raw=Number(el.value);if(el.value.trim()===''||!Number.isFinite(raw)){sync();return;}const next=normalize({...params,[key]:raw});if(Math.abs(next[key]-raw)>.001)toast(key==='spacing'?`Minimum spacing is ${fmt(next.spacing)} mm.`:'Adjusted to keep the mount geometry valid.');update(next,el.type==='range');});});
@@ -151,9 +161,9 @@ $('undo').onclick=()=>restoreEdit('undo');$('redo').onclick=()=>restoreEdit('red
 window.addEventListener('keydown',e=>{if(!(e.metaKey||e.ctrlKey)||e.altKey||!['z','y'].includes(e.key.toLowerCase())||e.target.closest('input:not([type=range]),textarea,[contenteditable]'))return;e.preventDefault();restoreEdit(e.shiftKey||e.key.toLowerCase()==='y'?'redo':'undo');});
 $('controls-toggle').onclick=()=>{const open=$('controls-body').hidden;$('controls-body').hidden=!open;$('controls-toggle').setAttribute('aria-expanded',String(open));$('controls-toggle').setAttribute('aria-label',open?'Hide controls':'Show controls');$('controls-toggle').dataset.icon=open?'chevron':'sliders';setIcons();};
 $('fit-view').onclick=()=>frameModel();
-document.querySelectorAll('[data-view]').forEach(el=>el.onclick=()=>{view=el.dataset.view;frameModel({direction:viewDirections[view]});syncView();});
-$('wire-toggle').onclick=()=>{wireframe=!wireframe;if(material)material.wireframe=wireframe;$('wire-toggle').setAttribute('aria-pressed',String(wireframe));render();};
-$('dimensions-toggle').onclick=()=>{showDimensions=!showDimensions;$('dimensions-toggle').setAttribute('aria-pressed',String(showDimensions));$('dimension-label').hidden=!showDimensions;dimensionLines();};
+document.querySelectorAll('[data-view]').forEach(el=>el.onclick=()=>{view=el.dataset.view;frameModel({direction:VIEW_DIRECTIONS[view],parallel:view!=='iso'});});
+$('wire-toggle').onclick=()=>{wireframe=!wireframe;if(mesh)mesh.material=wireframe?wireMaterial:material;$('wire-toggle').setAttribute('aria-pressed',String(wireframe));render();};
+$('dimensions-toggle').onclick=()=>{showDimensions=!showDimensions;$('dimensions-toggle').setAttribute('aria-pressed',String(showDimensions));frameModel({preserveZoom:true});};
 $('reset').onclick=()=>{update(DEFAULTS);toast('Original stereo mount restored.');};
 function toast(message){clearTimeout(toastTimer);$('status').textContent=message;$('status').classList.add('visible');toastTimer=setTimeout(()=>$('status').classList.remove('visible'),2800);}
 $('share').onclick=async()=>{persist();try{await navigator.clipboard.writeText(location.href);toast('Configuration link copied.');}catch{try{await navigator.share({title:'Webcam mount',url:location.href});}catch{toast('Copy the address to share this configuration.');}}};
@@ -174,6 +184,6 @@ $('export-json').onclick=()=>download(JSON.stringify(params,null,2),'json');
 $('import-json').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>100000)throw new Error();const data=JSON.parse(await file.text());if(!data||typeof data!=='object'||Array.isArray(data)||!Object.keys(DEFAULTS).some(k=>k in data))throw new Error();update(data);toast('Configuration imported.');}catch{toast('Choose a valid webcam settings JSON file.');}finally{e.target.value='';}};
 window.addEventListener('hashchange',()=>{try{if(location.hash.startsWith('#p='))update(JSON.parse(decodeURIComponent(location.hash.slice(3))));}catch{toast('This configuration link could not be read.');}});
 let light={az:Math.atan2(lightKey.position.z,lightKey.position.x),el:Math.asin(lightKey.position.y/lightKey.position.length())};
-setupGestures({canvas,camera,controls,render,onEditStart:()=>edits.begin(),onEditEnd:()=>{edits.end();sync();},onNudge:(axis,delta)=>{const key=axis==='horizontal'?'spacing':'cam_h',span=axis==='horizontal'?248:105;update({...params,[key]:params[key]+delta/420*span},true);},onLight:(dx,dy)=>{light.az+=dx*.012;light.el=Math.min(1.4,Math.max(.12,light.el-dy*.008));if(lightKey){const r=8.6,h=r*Math.cos(light.el);lightKey.position.set(h*Math.cos(light.az),r*Math.sin(light.el),h*Math.sin(light.az));}render();}});
+setupGestures({canvas,getCamera:()=>camera,controls,render,onEditStart:()=>edits.begin(),onEditEnd:()=>{edits.end();sync();},onNudge:(axis,delta)=>{const key=axis==='horizontal'?'spacing':'cam_h',span=axis==='horizontal'?248:105;update({...params,[key]:params[key]+delta/420*span},true);},onLight:(dx,dy)=>{light.az+=dx*.012;light.el=Math.min(1.4,Math.max(.12,light.el-dy*.008));if(lightKey){const r=8.6,h=r*Math.cos(light.el);lightKey.position.set(h*Math.cos(light.az),r*Math.sin(light.el),h*Math.sin(light.az));}render();}});
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 resize();update(params);
