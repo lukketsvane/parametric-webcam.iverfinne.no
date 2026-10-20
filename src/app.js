@@ -102,10 +102,20 @@ $('dimensions-toggle').onclick=()=>{showDimensions=!showDimensions;$('dimensions
 $('reset').onclick=()=>{update(DEFAULTS);toast('Original stereo mount restored.');};
 function toast(message){clearTimeout(toastTimer);$('status').textContent=message;$('status').classList.add('visible');toastTimer=setTimeout(()=>$('status').classList.remove('visible'),2800);}
 $('share').onclick=async()=>{persist();try{await navigator.clipboard.writeText(location.href);toast('Configuration link copied.');}catch{try{await navigator.share({title:'Webcam mount',url:location.href});}catch{toast('Copy the address to share this configuration.');}}};
-function download(data,type,extension){const url=URL.createObjectURL(new Blob([data],{type}));const a=document.createElement('a');a.href=url;a.download=`webcam-${params.camera_count}x-${fmt(params.spacing)}mm.${extension}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);toast(`${extension.toUpperCase()} exported.`);}
-$('export-stl').onclick=()=>{if(!mesh||completedId!==requestId)return;const geometry=mesh.geometry.clone();const p=geometry.attributes.position;const d=dimensions(params);for(let i=0;i<p.count;i++)p.setXYZ(i,p.getX(i),p.getY(i)+d.height/2,-p.getZ(i)+d.depth/2);const indices=geometry.index;for(let i=0;i<indices.count;i+=3){const b=indices.getX(i+1);indices.setX(i+1,indices.getX(i+2));indices.setX(i+2,b);}geometry.computeVertexNormals();const exported=new THREE.Mesh(geometry);exported.updateMatrixWorld(true);download(new STLExporter().parse(exported,{binary:true}),'model/stl','stl');geometry.dispose();};
-$('export-scad').onclick=()=>download(generateScad(params),'text/plain','scad');
-$('export-json').onclick=()=>download(JSON.stringify(params,null,2),'application/json','json');
+function download(data,extension){
+ const url=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));
+ const a=document.createElement('a');
+ a.href=url;
+ a.download=`webcam-${params.camera_count}x-${fmt(params.spacing)}mm.${extension}`;
+ a.hidden=true;
+ document.body.append(a);
+ a.click();
+ setTimeout(()=>{a.remove();URL.revokeObjectURL(url);},60000);
+ toast(`${extension.toUpperCase()} download requested.`);
+}
+$('export-stl').onclick=()=>{if(!mesh||completedId!==requestId)return;const geometry=mesh.geometry.clone();const p=geometry.attributes.position;const d=dimensions(params);for(let i=0;i<p.count;i++)p.setXYZ(i,p.getX(i),p.getY(i)+d.height/2,-p.getZ(i)+d.depth/2);const indices=geometry.index;for(let i=0;i<indices.count;i+=3){const b=indices.getX(i+1);indices.setX(i+1,indices.getX(i+2));indices.setX(i+2,b);}geometry.computeVertexNormals();const exported=new THREE.Mesh(geometry);exported.updateMatrixWorld(true);download(new STLExporter().parse(exported,{binary:true}),'stl');geometry.dispose();};
+$('export-scad').onclick=()=>download(generateScad(params),'scad');
+$('export-json').onclick=()=>download(JSON.stringify(params,null,2),'json');
 $('import-json').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>100000)throw new Error();const data=JSON.parse(await file.text());if(!data||typeof data!=='object'||Array.isArray(data)||!Object.keys(DEFAULTS).some(k=>k in data))throw new Error();update(data);toast('Configuration imported.');}catch{toast('Choose a valid webcam settings JSON file.');}finally{e.target.value='';}};
 window.addEventListener('hashchange',()=>{try{if(location.hash.startsWith('#p='))update(JSON.parse(decodeURIComponent(location.hash.slice(3))));}catch{toast('This configuration link could not be read.');}});
 let light={az:.64,el:.95};
