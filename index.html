@@ -23,23 +23,24 @@
   <section class="stage" aria-label="Interactive 3D model">
     <div id="viewport"><canvas id="canvas" aria-label="3D webcam mount. Drag to rotate, pinch to zoom, two-finger drag to shape."></canvas><div class="loading" id="loading">building</div></div>
     <div class="dimension-label" id="dimension-label" hidden><span id="dimension-value">140 mm</span></div>
+    <div class="stage-meta"><span class="material-label"><i aria-hidden="true"></i>matte black PLA</span><output id="model-size" class="model-size" aria-label="Overall model dimensions">178.4 × 64.2 × 20.5 mm</output></div>
     <div class="build-state" id="build-state" role="status" aria-live="polite"></div>
   </section>
   <div class="dock-wrap">
     <section class="dock" aria-label="Webcam controls">
       <div class="dock-header">
         <select id="camera_count" data-param="camera_count" class="engine-picker" aria-label="Camera count"></select>
-        <span class="piece-name"><output id="dock-spacing">140</output><span> mm</span></span>
+        <span class="piece-name"><output id="dock-spacing">140</output><span id="spacing-unit"> mm</span></span>
         <button id="export-stl" class="icon-button solid" aria-label="Download STL" title="Download STL" data-icon="download" disabled></button>
         <button id="controls-toggle" class="icon-button" aria-label="Show controls" aria-expanded="false" aria-controls="controls-body" data-icon="sliders"></button>
       </div>
       <div id="controls-body" class="controls-body" hidden>
+        <div class="history-controls" aria-label="Edit history"><button class="chip" id="undo" disabled title="Undo (⌘/Ctrl Z)"><span data-icon="undo"></span>undo</button><button class="chip" id="redo" disabled title="Redo (⌘/Ctrl Shift Z)"><span data-icon="redo"></span>redo</button></div>
         <div class="primary-fields" id="layout-fields"></div>
-        <div class="view-controls" aria-label="View controls"><button class="chip selected" data-view="iso" aria-pressed="true">3D</button><button class="chip" data-view="front" aria-pressed="false">front</button><button class="chip" data-view="rear" aria-pressed="false">rear</button><button class="chip" id="fit-view" aria-label="Fit model to view" data-icon="fit"></button><button class="chip" id="dimensions-toggle" aria-label="Show dimensions" aria-pressed="false" data-icon="ruler"></button><button class="chip" id="wire-toggle" aria-label="Show wireframe" aria-pressed="false" data-icon="wire"></button></div>
+        <div class="view-controls" aria-label="View controls"><button class="chip selected" data-view="iso" aria-pressed="true">3D</button><button class="chip" data-view="front" aria-pressed="false">front</button><button class="chip" data-view="rear" aria-pressed="false">rear</button><button class="chip" data-view="top" aria-pressed="false">top</button><button class="chip" id="fit-view" aria-label="Fit model to view" data-icon="fit"></button><button class="chip" id="dimensions-toggle" aria-label="Show dimensions" aria-pressed="false" data-icon="ruler"></button><button class="chip" id="wire-toggle" aria-label="Show wireframe" aria-pressed="false" data-icon="wire"></button></div>
         <details><summary>camera<span data-icon="chevron"></span></summary><div id="camera-fields"></div><div id="lens-fields"></div></details>
-        <details><summary>mount<span data-icon="chevron"></span></summary><div id="fit-fields"></div><div id="adapter-fields"></div></details>
+        <details><summary>mount<span data-icon="chevron"></span></summary><div id="fit-fields"></div><p class="field-note">Clearance is total, split across both sides.</p><div id="adapter-fields"></div></details>
         <details><summary>cable &amp; retention<span data-icon="chevron"></span></summary><div id="cable-fields"></div></details>
-        <div class="model-size" id="model-size">178.4 × 64.2 × 20.5 mm</div>
         <div class="export-row" aria-label="Export formats"><button class="chip" id="export-scad">OpenSCAD</button><button class="chip" id="export-json">settings</button><label class="chip import-settings">import<input id="import-json" type="file" accept=".json,application/json" aria-label="Import saved settings"></label><button class="chip" id="share">share</button><button class="chip" id="reset">reset</button></div>
         <p class="gesture-note">drag to orbit · pinch to zoom<br>two fingers to shape · three to light</p>
       </div>

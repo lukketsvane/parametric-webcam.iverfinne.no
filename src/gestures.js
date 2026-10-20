@@ -1,10 +1,17 @@
 import * as THREE from 'three';
 
-export function setupGestures({ canvas, camera, controls, onNudge, onLight, render }) {
+export function setupGestures({ canvas, camera, controls, onNudge, onLight, onEditStart, onEditEnd, render }) {
   const points = new Map();
   let mode = 'none';
   let last = { cx: 0, cy: 0, d: 0 };
   let snapshot = null;
+  let frame = null;
+  let editing = false;
+  const endEdit = () => {
+    if (!editing) return;
+    editing = false;
+    onEditEnd?.();
+  };
   const restoreCamera = () => {
     if (!snapshot) return;
     camera.position.copy(snapshot.position);
@@ -27,35 +34,13 @@ export function setupGestures({ canvas, camera, controls, onNudge, onLight, rend
     }
     return { x: x / points.size, y: y / points.size };
   };
-  const down = event => {
-    if (event.pointerType !== 'touch') return;
-    points.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (points.size === 1) {
-      snapshot = {
-        position: camera.position.clone(),
-        target: controls?.target?.clone() ?? new THREE.Vector3()
-      };
-    }
-    if (points.size === 2 && mode !== 'light') {
-      mode = 'none';
-      last = measure();
-      if (controls) controls.enabled = false;
-    }
-    if (points.size === 3) {
-      mode = 'light';
-      const center = centroid();
-      last = { cx: center.x, cy: center.y, d: 0 };
-      if (controls) controls.enabled = false;
-      restoreCamera();
-    }
-  };
-  const move = event => {
-    if (!points.has(event.pointerId)) return;
-    points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  const process = () => {
     if (mode === 'light') {
       if (points.size < 3) return;
       const center = centroid();
-      onLight?.(center.x - last.cx, center.y - last.cy);
+      const dx = center.x - last.cx;
+      const dy = center.y - last.cy;
+      if (dx || dy) onLight?.(dx, dy);
       last = { cx: center.x, cy: center.y, d: 0 };
       return;
     }
@@ -74,7 +59,13 @@ export function setupGestures({ canvas, camera, controls, onNudge, onLight, rend
       } else {
         return;
       }
-      if (mode !== 'pinch') restoreCamera();
+      if (mode !== 'pinch') {
+        restoreCamera();
+        if (!editing) {
+          editing = true;
+          onEditStart?.();
+        }
+      }
     }
     if (mode === 'pinch') {
       if (last.d > 0 && center.d > 0) {
@@ -90,33 +81,85 @@ export function setupGestures({ canvas, camera, controls, onNudge, onLight, rend
         render();
       }
     } else if (mode === 'vertical') {
-      onNudge('vertical', -dy);
-    } else {
+      if (dy) onNudge('vertical', -dy);
+    } else if (dx) {
       onNudge('horizontal', dx);
     }
     last = center;
   };
+  const flush = () => {
+    if (frame !== null) {
+      cancelAnimationFrame(frame);
+      frame = null;
+    }
+    process();
+  };
+  const down = event => {
+    if (event.pointerType !== 'touch') return;
+    flush();
+    points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (points.size === 1) {
+      snapshot = {
+        position: camera.position.clone(),
+        target: controls?.target?.clone() ?? new THREE.Vector3()
+      };
+    }
+    if (points.size === 2 && mode !== 'light') {
+      mode = 'none';
+      last = measure();
+      if (controls) controls.enabled = false;
+    }
+    if (points.size >= 3) {
+      const wasLight = mode === 'light';
+      mode = 'light';
+      endEdit();
+      const center = centroid();
+      last = { cx: center.x, cy: center.y, d: 0 };
+      if (controls) controls.enabled = false;
+      if (!wasLight) restoreCamera();
+    }
+  };
+  const move = event => {
+    if (!points.has(event.pointerId)) return;
+    points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (points.size < 2 || frame !== null) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      process();
+    });
+  };
   const finish = () => {
+    flush();
     points.clear();
     mode = 'none';
     snapshot = null;
+    endEdit();
     if (controls) controls.enabled = true;
   };
   const up = event => {
-    if (!points.delete(event.pointerId)) return;
+    if (!points.has(event.pointerId)) return;
+    points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    flush();
+    points.delete(event.pointerId);
     if (points.size === 0) finish();
-    else if (points.size < 2 && mode !== 'light') mode = 'none';
+    else if (mode === 'light') {
+      const center = centroid();
+      last = { cx: center.x, cy: center.y, d: 0 };
+    } else if (points.size < 2) mode = 'none';
+  };
+  const cancel = event => {
+    if (points.has(event.pointerId)) finish();
   };
   canvas.addEventListener('pointerdown', down);
   window.addEventListener('pointermove', move, { passive: true });
   window.addEventListener('pointerup', up);
-  window.addEventListener('pointercancel', up);
+  window.addEventListener('pointercancel', cancel);
   window.addEventListener('blur', finish);
   return () => {
     canvas.removeEventListener('pointerdown', down);
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
-    window.removeEventListener('pointercancel', up);
+    window.removeEventListener('pointercancel', cancel);
     window.removeEventListener('blur', finish);
     finish();
   };
